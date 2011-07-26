@@ -1,0 +1,6 @@
+This external will try to get as much functionality of OpenNI exposed to the puredata user.
+
+
+Currently, development is focussed on making a basic [openni] object, based on NiUserTracker and LibraryTemplate.
+
+
