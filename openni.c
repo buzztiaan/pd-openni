@@ -1,7 +1,7 @@
 /*
 first attempt at an OpenNI pd interface
 
-- buZz [Puik.] 
+- buZz [Puik.]
   http://puikheid.nl/
   started; 26-07-2011
 
@@ -10,12 +10,14 @@ first attempt at an OpenNI pd interface
 */
 
 
-#include "m_pd.h"
+#include <pdextended/m_pd.h>
+#include <pdextended/m_imp.h>
 
 #include <ni/XnOpenNI.h>
 #include <ni/XnCodecIDs.h>
 #include <ni/XnCppWrapper.h>
 
+#include <string.h>
 
 xn::Context g_Context;
 xn::ScriptNode g_scriptNode;
@@ -26,16 +28,30 @@ xn::Player g_Player;
 XnBool g_bNeedPose = FALSE;
 XnChar g_strPose[20] = "";
 
-#define CONFIG_XML_PATH "pd-openni.xml"
+#define CONFIG_XML_PATH "/pd-openni.xml"
 
 #define CHECK_RC(nRetVal, what)									\
 	if (nRetVal != XN_STATUS_OK)								\
 	{											\
-		post("openni: %s failed: %s\n", what, xnGetStatusString(nRetVal));		\
+		post("openni: %s failed: %s", what, xnGetStatusString(nRetVal));		\
 	}
 /*		return nRetVal;									\
 	}
 */
+
+   /* the data structure for each copy of "openni".  In this case we
+   only need pd's obligatory header (of type t_object). */
+typedef struct openni
+{
+  t_object x_ob;
+} t_openni;
+
+
+    /* this is a pointer to the class for "openni", which is created in the
+    "setup" routine below and used to create new ones in the "new" routine. */
+t_class *openni_class;
+
+
 
 void XN_CALLBACK_TYPE MyCalibrationInProgress(xn::SkeletonCapability& capability, XnUserID id, XnCalibrationStatus calibrationError, void* pCookie)
 {
@@ -49,7 +65,7 @@ void XN_CALLBACK_TYPE MyPoseInProgress(xn::PoseDetectionCapability& capability, 
 // Callback: New user was detected
 void XN_CALLBACK_TYPE User_NewUser(xn::UserGenerator& generator, XnUserID nId, void* pCookie)
 {
-	post("openni: New User %d\n", nId);
+	post("openni: New User %d", nId);
 	// New user found
 	if (g_bNeedPose)
 	{
@@ -65,13 +81,13 @@ void XN_CALLBACK_TYPE User_NewUser(xn::UserGenerator& generator, XnUserID nId, v
 // Callback: An existing user was lost
 void XN_CALLBACK_TYPE User_LostUser(xn::UserGenerator& generator, XnUserID nId, void* pCookie)
 {
-	post("openni: Lost user %d\n", nId);
+	post("openni: Lost user %d", nId);
 }
 
 // Callback: Detected a pose
 void XN_CALLBACK_TYPE UserPose_PoseDetected(xn::PoseDetectionCapability& capability, const XnChar* strPose, XnUserID nId, void* pCookie)
 {
-	post("openni: Pose %s detected for user %d\n", strPose, nId);
+	post("openni: Pose %s detected for user %d", strPose, nId);
 	g_UserGenerator.GetPoseDetectionCap().StopPoseDetection(nId);
 	g_UserGenerator.GetSkeletonCap().RequestCalibration(nId, TRUE);
 }
@@ -79,7 +95,7 @@ void XN_CALLBACK_TYPE UserPose_PoseDetected(xn::PoseDetectionCapability& capabil
 // Callback: Started calibration
 void XN_CALLBACK_TYPE UserCalibration_CalibrationStart(xn::SkeletonCapability& capability, XnUserID nId, void* pCookie)
 {
-	post("openni: Calibration started for user %d\n", nId);
+	post("openni: Calibration started for user %d", nId);
 }
 
 // Callback: Finished calibration
@@ -88,13 +104,13 @@ void XN_CALLBACK_TYPE UserCalibration_CalibrationEnd(xn::SkeletonCapability& cap
 	if (bSuccess)
 	{
 		// Calibration succeeded
-		post("openni: Calibration complete, start tracking user %d\n", nId);
+		post("openni: Calibration complete, start tracking user %d", nId);
 		g_UserGenerator.GetSkeletonCap().StartTracking(nId);
 	}
 	else
 	{
 		// Calibration failed
-		post("openni: Calibration failed for user %d\n", nId);
+		post("openni: Calibration failed for user %d", nId);
 		if (g_bNeedPose)
 		{
 			g_UserGenerator.GetPoseDetectionCap().StartPoseDetection(g_strPose, nId);
@@ -111,13 +127,13 @@ void XN_CALLBACK_TYPE UserCalibration_CalibrationComplete(xn::SkeletonCapability
 	if (eStatus == XN_CALIBRATION_STATUS_OK)
 	{
 		// Calibration succeeded
-		post("openni: Calibration complete, start tracking user %d\n", nId);
+		post("openni: Calibration complete, start tracking user %d", nId);
 		g_UserGenerator.GetSkeletonCap().StartTracking(nId);
 	}
 	else
 	{
 		// Calibration failed
-		post("openni: Calibration failed for user %d\n", nId);
+		post("openni: Calibration failed for user %d", nId);
 		if (g_bNeedPose)
 		{
 			g_UserGenerator.GetPoseDetectionCap().StartPoseDetection(g_strPose, nId);
@@ -129,26 +145,6 @@ void XN_CALLBACK_TYPE UserCalibration_CalibrationComplete(xn::SkeletonCapability
 	}
 }
 
-
-    /* the data structure for each copy of "openni".  In this case we
-    only need pd's obligatory header (of type t_object). */
-typedef struct openni
-{
-  t_object x_ob;
-} t_openni;
-
-
-    /* this is a pointer to the class for "openni", which is created in the
-    "setup" routine below and used to create new ones in the "new" routine. */
-t_class *openni_class;
-
-    /* this is called when a new "openni" object is created. */
-extern "C" void *openni_new(void)
-{
-    t_openni *x = (t_openni *)pd_new(openni_class);
-    post("openni_new");
-    return (void *)x;
-}
 
 void update_openni(void)
 {
@@ -188,17 +184,18 @@ void start_openni(void)
 	XnStatus nRetVal = XN_STATUS_OK;
 
 	xn::EnumerationErrors errors;
-	nRetVal = g_Context.InitFromXmlFile(CONFIG_XML_PATH, g_scriptNode, &errors);
+
+	nRetVal = g_Context.InitFromXmlFile(strncat(( openni_class -> c_externdir -> s_name ),CONFIG_XML_PATH,20), g_scriptNode, &errors);
 	if (nRetVal == XN_STATUS_NO_NODE_PRESENT)
 	{
 		XnChar strError[1024];
 		errors.ToString(strError, 1024);
-		post("openni: %s\n", strError);
+		post("openni: %s", strError);
 //			return (nRetVal);
 	}
 	else if (nRetVal != XN_STATUS_OK)
 	{
-		post("openni: Open failed: %s\n", xnGetStatusString(nRetVal));
+		post("openni: Open failed: %s", xnGetStatusString(nRetVal));
 //		return (nRetVal);
 	}
 
@@ -214,7 +211,7 @@ void start_openni(void)
 	XnCallbackHandle hUserCallbacks, hCalibrationStart, hCalibrationComplete, hPoseDetected, hCalibrationInProgress, hPoseInProgress;
 	if (!g_UserGenerator.IsCapabilitySupported(XN_CAPABILITY_SKELETON))
 	{
-		post("openni: Supplied user generator doesn't support skeleton\n");
+		post("openni: Supplied user generator doesn't support skeleton");
 //		return 1;
 	}
 	nRetVal = g_UserGenerator.RegisterUserCallbacks(User_NewUser, User_LostUser, NULL, hUserCallbacks);
@@ -229,7 +226,7 @@ void start_openni(void)
 		g_bNeedPose = TRUE;
 		if (!g_UserGenerator.IsCapabilitySupported(XN_CAPABILITY_POSE_DETECTION))
 		{
-			post("openni: Pose required, but not supported\n");
+			post("openni: Pose required, but not supported");
 //			return 1;
 		}
 		nRetVal = g_UserGenerator.GetPoseDetectionCap().RegisterToPoseDetected(UserPose_PoseDetected, NULL, hPoseDetected);
@@ -250,14 +247,24 @@ void start_openni(void)
 
 }
 
+    /* this is called when a new "openni" object is created. */
+extern "C" void *openni_new(void)
+{
+    t_openni *x = (t_openni *)pd_new(openni_class);
+    post("[openni] initializing");
+    start_openni();
+    post("[openni] initialized");
+    return (void *)x;
+}
+
+
 extern "C" void openni_setup(void)
 {
-    post("openni_setup");
+    post("pd-openni [openni] object");
+    post("2k11 buZz [Puik.] http://puikheid.nl/");
+
     openni_class = class_new(gensym("openni"), (t_newmethod)openni_new, 0, sizeof(t_openni), CLASS_PATCHABLE, A_DEFFLOAT,  0);
     class_addmethod(openni_class, (t_method)openni_bang, gensym("bang"), A_NULL);
     class_addfloat(openni_class, openni_float);
-
-	start_openni();
-
 }
 
